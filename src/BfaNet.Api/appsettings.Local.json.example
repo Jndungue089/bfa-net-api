@@ -1,0 +1,6 @@
+{
+  "_comment": "Copy to appsettings.Local.json (git-ignored, Development only) and put your real local database credentials here.",
+  "ConnectionStrings": {
+    "Default": "Host=localhost;Port=5432;Database=bfanet;Username=SEU_USER;Password=SUA_PASSWORD"
+  }
+}
