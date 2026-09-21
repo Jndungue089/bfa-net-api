@@ -1,0 +1,79 @@
+name: CI/CD
+
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  APP_NAME: bfa-net-api
+  REGISTRY: ghcr.io
+
+jobs:
+  build:
+    if: github.actor == 'Jndungue089'
+    runs-on: self-hosted
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image-ref: ${{ steps.meta.outputs.image-ref }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: meta
+        run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
+          BRANCH="${GITHUB_REF_NAME//\//-}"
+          IMAGE_NAME="${REGISTRY}/${GITHUB_REPOSITORY,,}"
+          IMAGE_REF="${IMAGE_NAME}:${BRANCH}-${SHORT_SHA}"
+          echo "image-name=${IMAGE_NAME}" >> "$GITHUB_OUTPUT"
+          echo "image-ref=${IMAGE_REF}" >> "$GITHUB_OUTPUT"
+      - name: Build and publish image
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LATEST_TAG: ${{ github.ref_name == 'main' && format('{0}:latest', steps.meta.outputs.image-name) || '' }}
+        run: |
+          set -euo pipefail
+          flock /tmp/bfa-ghcr-registry.lock bash -euo pipefail -c '
+            DOCKER_CONFIG=$(mktemp -d)
+            export DOCKER_CONFIG
+            echo "${GHCR_TOKEN}" | docker login "${REGISTRY}" -u "${GITHUB_ACTOR}" --password-stdin
+            tags=(-t "${{ steps.meta.outputs.image-ref }}")
+            if [ -n "${LATEST_TAG}" ]; then
+              tags+=(-t "${LATEST_TAG}")
+            fi
+            docker build "${tags[@]}" --file ./Dockerfile .
+            docker push "${{ steps.meta.outputs.image-ref }}"
+            if [ -n "${LATEST_TAG}" ]; then
+              docker push "${LATEST_TAG}"
+            fi
+          '
+
+  deploy:
+    needs: build
+    if: github.actor == 'Jndungue089' && github.event_name == 'push'
+    runs-on: self-hosted
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Deploy image on this VPS
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          DOCKER_CONFIG=$(mktemp -d)
+          export DOCKER_CONFIG
+          echo "${GHCR_TOKEN}" | docker login "${REGISTRY}" -u "${GITHUB_ACTOR}" --password-stdin
+          ENVIRONMENT="staging"
+          if [ "${GITHUB_REF_NAME}" = "main" ]; then
+            ENVIRONMENT="production"
+          fi
+          /root/bfa-net/scripts/deploy-app.sh "${ENVIRONMENT}" "${APP_NAME}" "${{ needs.build.outputs.image-ref }}"
