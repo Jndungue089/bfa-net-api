@@ -226,3 +226,23 @@ public sealed class VerifyPinRequestValidator : AbstractValidator<VerifyPinReque
 {
     public VerifyPinRequestValidator() => RuleFor(x => x.Pin).Matches(Patterns.PinPattern).WithMessage("PIN inválido.");
 }
+
+public sealed class AcceptCreditRequestValidator : AbstractValidator<AcceptCreditRequest>
+{
+    public AcceptCreditRequestValidator()
+    {
+        RuleFor(x => x.AccountId).NotEmpty();
+        RuleFor(x => x.Amount).Money();
+        RuleFor(x => x.Months).InclusiveBetween(1, 60);
+        RuleFor(x => x.Pin).Matches(Patterns.PinPattern).WithMessage("PIN inválido.");
+    }
+}
+
+public sealed class RepayLoanRequestValidator : AbstractValidator<RepayLoanRequest>
+{
+    public RepayLoanRequestValidator()
+    {
+        RuleFor(x => x.FromAccountId).NotEmpty();
+        RuleFor(x => x.Pin).Matches(Patterns.PinPattern).WithMessage("PIN inválido.");
+    }
+}

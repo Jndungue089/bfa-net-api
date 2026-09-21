@@ -80,18 +80,57 @@ public static class DataSeeder
         db.Beneficiaries.Add(new Beneficiary { CustomerId = customer.Id, Name = "João Manuel Pereira", Iban = Iban.Generate("0001", "20000000001"), BankName = "BFA", CreatedAt = now });
         await db.SaveChangesAsync(ct);
 
-        // Opening balances go through the ledger like everything else (cash vault → customer).
-        await Deposit(ordem.Id, 1_250_000m, "Depósito inicial");
-        await Deposit(poupanca.Id, 3_400_000m, "Depósito inicial");
-        await Deposit(ordem.Id, 450_000m, "Salário");
+        await SeedHistoryAsync(db, poster, customer, ordem.Id, poupanca.Id, now, ct);
+    }
 
-        async Task Deposit(Guid accountId, decimal amount, string description)
+    /// <summary>
+    /// ~100 days of believable activity so the financial assistant has something real to analyse: salary on the 27th, rent,
+    /// utilities, TV, groceries, fuel, a recurring school fee, two interbank transfers (with fees) and one unusually big purchase
+    /// this month. Deterministic (fixed seed) and posted chronologically through the ledger, so balances are always consistent.
+    /// </summary>
+    private static async Task SeedHistoryAsync(BankDbContext db, LedgerPoster poster, Customer customer, Guid main, Guid savings, DateTimeOffset now, CancellationToken ct)
+    {
+        var wat = TimeSpan.FromHours(1);
+        var today = DateOnly.FromDateTime(now.ToOffset(wat).DateTime);
+        var start = today.AddDays(-100);
+        var rnd = new Random(7);
+
+        async Task Move(DateOnly day, TransactionKind kind, decimal amount, string description, string counterparty, string? ext, Guid other, bool incoming, Guid account, decimal fee = 0)
         {
+            var at = new DateTimeOffset(day.ToDateTime(new TimeOnly(10, 0)), wat).ToUniversalTime().AddMinutes(rnd.Next(0, 240));
+            var legs = incoming
+                ? new List<PostingLeg> { new(other, LedgerDirection.Debit, amount), new(account, LedgerDirection.Credit, amount) }
+                : new List<PostingLeg> { new(account, LedgerDirection.Debit, amount + fee), new(other, LedgerDirection.Credit, amount) };
+            if (!incoming && fee > 0) legs.Add(new(SystemAccounts.Fees, LedgerDirection.Credit, fee));
             await using var tx = await db.Database.BeginTransactionAsync(ct);
-            await poster.PostAsync(new LedgerPoster.NewTransaction(customer.Id, Guid.NewGuid(), Guid.NewGuid().ToString("N"), TransactionKind.Deposit,
-                amount, 0, description, "BFA", "BFA", null, null),
-                LedgerPosting.Create([new(SystemAccounts.CashVault, LedgerDirection.Debit, amount), new(accountId, LedgerDirection.Credit, amount)]), ct);
+            await poster.PostAsync(new LedgerPoster.NewTransaction(customer.Id, Guid.NewGuid(), Guid.NewGuid().ToString("N"), kind, amount, fee, description,
+                incoming ? counterparty : customer.FullName, incoming ? customer.FullName : counterparty, null, ext, at), LedgerPosting.Create(legs), ct);
             await tx.CommitAsync(ct);
         }
+
+        Task Deposit(DateOnly d, decimal amount, string what, string from, Guid account) => Move(d, TransactionKind.Deposit, amount, what, from, null, SystemAccounts.CashVault, true, account);
+        Task Pay(DateOnly d, decimal amount, string description, string who, string? ext = null, TransactionKind kind = TransactionKind.ServicePayment) =>
+            Move(d, kind, amount, description, who, ext, kind == TransactionKind.TopUp ? SystemAccounts.TopUpSettlement : SystemAccounts.ServiceSettlement, false, main);
+
+        await Deposit(start, 1_250_000m, "Depósito inicial", "BFA", main);
+        await Deposit(start, 3_400_000m, "Depósito inicial", "BFA", savings);
+
+        for (var d = start.AddDays(1); d <= today; d = d.AddDays(1))
+        {
+            var age = today.DayNumber - d.DayNumber;
+            if (d.Day == 27) await Deposit(d, 450_000m, "Salário", "Empresa Alfa, Lda", main);
+            if (d.Day == 3) await Pay(d, 120_000m, "Renda de casa", "Imobiliária Sol");
+            if (d.Day == 5) await Pay(d, 35_000m, "Propina", "Colégio São José");
+            if (d.Day == 12) await Pay(d, 15_000m, "Pagamento DStv", "DStv", "Dstv:1234567890", TransactionKind.TopUp);
+            if (d.Day == 15) await Pay(d, Math.Round(11_000m + rnd.Next(0, 2500), 0), "Pagamento ENDE", "ENDE", "Ende:123456789012", TransactionKind.TopUp);
+            if (d.Day is 8 or 22) await Pay(d, 5_000m, "Carregamento Unitel 923456789", "Unitel", "Unitel:923456789", TransactionKind.TopUp);
+            if (d.DayNumber % 5 == 0) await Pay(d, Math.Round(9_000m + rnd.Next(0, 11_000), 0), "Compras do mês", "Kero Hipermercado", "11223/123456789");
+            if (d.DayNumber % 7 == 1) await Pay(d, Math.Round(6_000m + rnd.Next(0, 4_000), 0), "Combustível", "Sonangol", "44551/987654321");
+            if (d.DayNumber % 6 == 2) await Pay(d, Math.Round(4_000m + rnd.Next(0, 5_000), 0), "Almoço", "Restaurante Mama Zeca", "77889/111222333");
+            if (age is 90 or 62) await Pay(d, 10_000m, "Compra - Loja do Zé", "Loja do Zé", "55667/444555666");
+            if (age is 70 or 35) await Move(d, TransactionKind.Transfer, 12_000m, "Ajuda familiar", "Ana Costa", null, SystemAccounts.InterbankSettlement, false, main, fee: 150m);
+            if (age == 4) await Pay(d, 65_000m, "Compra - Móveis & Decor", "Móveis & Decor", "99887/555444333");
+        }
+        await Task.CompletedTask;
     }
 }

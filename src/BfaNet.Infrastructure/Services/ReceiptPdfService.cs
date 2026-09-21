@@ -29,7 +29,7 @@ public sealed class ReceiptPdfService(BankDbContext db, IRequestContext ctx, Tim
             ?? throw AppException.NotFound("Transacção", feminine: true); // same 404 for "missing" and "someone else's"
 
         // A deposit is always money arriving, whoever the seed/back-office recorded as initiator.
-        var payer = tx.InitiatedBy == me && tx.Kind != TransactionKind.Deposit;
+        var payer = tx.InitiatedBy == me && tx.Kind is not (TransactionKind.Deposit or TransactionKind.Loan);
         var debit = tx.Entries.First(e => e.Direction == LedgerDirection.Debit);
         var myIds = await mine.ToListAsync(ct);
         var myEntry = tx.Entries.First(e => myIds.Contains(e.AccountId));
@@ -148,6 +148,7 @@ public sealed class ReceiptPdfService(BankDbContext db, IRequestContext ctx, Tim
     private static string KindLabel(TransactionKind k) => k switch
     {
         TransactionKind.Transfer => "Transferência", TransactionKind.ServicePayment => "Pagamento de serviços", TransactionKind.TopUp => "Carregamento / pagamento a fornecedor",
-        TransactionKind.StatePayment => "Pagamento ao Estado", TransactionKind.Deposit => "Depósito", _ => "Comissão",
+        TransactionKind.StatePayment => "Pagamento ao Estado", TransactionKind.Deposit => "Depósito",
+        TransactionKind.Loan => "Microcrédito", TransactionKind.LoanRepayment => "Prestação de microcrédito", _ => "Comissão",
     };
 }

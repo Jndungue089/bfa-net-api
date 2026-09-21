@@ -90,6 +90,34 @@ public sealed class ApiFixture : WebApplicationFactory<Program>, IAsyncLifetime
         await tx.CommitAsync();
     }
 
+    /// <summary>Posts a backdated movement through the real ledger (salary in, spending out) so the assistant has history to analyse.</summary>
+    public async Task PostBackdatedAsync(Guid accountId, bool incoming, decimal amount, int daysAgo, BfaNet.Domain.TransactionKind kind, string description, string counterparty, string? ext = null)
+    {
+        await using var scope = Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<BfaNet.Infrastructure.Persistence.BankDbContext>();
+        var poster = scope.ServiceProvider.GetRequiredService<BfaNet.Infrastructure.Services.LedgerPoster>();
+        var owner = db.Accounts.Where(a => a.Id == accountId).Select(a => a.CustomerId!.Value).Single();
+        var other = incoming ? BfaNet.Application.Common.SystemAccounts.CashVault : BfaNet.Application.Common.SystemAccounts.ServiceSettlement;
+        var legs = incoming
+            ? new[] { new BfaNet.Domain.Ledger.PostingLeg(other, BfaNet.Domain.LedgerDirection.Debit, amount), new(accountId, BfaNet.Domain.LedgerDirection.Credit, amount) }
+            : [new BfaNet.Domain.Ledger.PostingLeg(accountId, BfaNet.Domain.LedgerDirection.Debit, amount), new(other, BfaNet.Domain.LedgerDirection.Credit, amount)];
+        await using var tx = await db.Database.BeginTransactionAsync();
+        await poster.PostAsync(new(owner, Guid.NewGuid(), Guid.NewGuid().ToString("N"), kind, amount, 0, description, incoming ? counterparty : "Cliente", incoming ? "Cliente" : counterparty, null, ext,
+            DateTimeOffset.UtcNow.AddDays(-daysAgo)), BfaNet.Domain.Ledger.LedgerPosting.Create(legs), default);
+        await tx.CommitAsync();
+    }
+
+    /// <summary>A salaried customer with ~3 months of believable history (eligible for a microcredit).</summary>
+    public async Task<Customer> RegisterSalariedAsync()
+    {
+        var c = await RegisterAsync();
+        await PostBackdatedAsync(c.AccountId, true, 1_000_000m, 85, BfaNet.Domain.TransactionKind.Deposit, "Depósito inicial", "BFA");
+        foreach (var d in new[] { 55, 28, 1 }) await PostBackdatedAsync(c.AccountId, true, 450_000m, d, BfaNet.Domain.TransactionKind.Deposit, "Salário", "Empresa Alfa");
+        foreach (var d in new[] { 80, 74, 66, 58, 50, 44, 36, 30, 22, 15, 8, 3 })
+            await PostBackdatedAsync(c.AccountId, false, 60_000m + d * 100, d, BfaNet.Domain.TransactionKind.ServicePayment, "Compras", "Kero Hipermercado", "11223/123456789");
+        return c;
+    }
+
     public static HttpRequestMessage Transfer(Customer from, string toIban, decimal amount, Guid? key = null, string? pin = null) =>
         new(HttpMethod.Post, "/api/v1/transfers")
         {

@@ -24,6 +24,7 @@ public static class ApiEndpoints
         MapMoney(secured);
         MapBeneficiaries(secured.MapGroup("/beneficiaries"));
         MapCards(secured.MapGroup("/cards"));
+        MapAssistant(secured.MapGroup("/assistant"));
     }
 
     private static void MapPublic(RouteGroupBuilder g)
@@ -184,6 +185,18 @@ public static class ApiEndpoints
             Results.Json(await s.CreateAsync(r, ct), statusCode: 201)).Validate<BeneficiaryRequest>();
         g.MapDelete("/{id:guid}", async (Guid id, IBeneficiaryService s, CancellationToken ct) =>
         { await s.DeleteAsync(id, ct); return Results.NoContent(); });
+    }
+
+    private static void MapAssistant(RouteGroupBuilder g)
+    {
+        g.MapGet("/insights", (IAssistantService s, CancellationToken ct) => s.InsightsAsync(ct));
+        g.MapGet("/credit", (IAssistantService s, CancellationToken ct) => s.CreditOfferAsync(ct));
+        g.MapGet("/credit/simulate", (decimal amount, int months, IAssistantService s, CancellationToken ct) => s.SimulateAsync(amount, months, ct));
+        g.MapPost("/credit/accept", async (AcceptCreditRequest r, HttpContext http, IAssistantService s, CancellationToken ct) =>
+            Results.Ok(await s.AcceptCreditAsync(IdempotencyKey(http), r, ct))).Validate<AcceptCreditRequest>().RequireRateLimiting(RateLimiting.Money);
+        g.MapGet("/loans", (IAssistantService s, CancellationToken ct) => s.LoansAsync(ct));
+        g.MapPost("/loans/{id:guid}/repay", async (Guid id, RepayLoanRequest r, HttpContext http, IAssistantService s, CancellationToken ct) =>
+            Results.Ok(await s.RepayAsync(IdempotencyKey(http), id, r, ct))).Validate<RepayLoanRequest>().RequireRateLimiting(RateLimiting.Money);
     }
 
     private static void MapCards(RouteGroupBuilder g)

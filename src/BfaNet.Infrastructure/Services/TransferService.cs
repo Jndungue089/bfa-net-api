@@ -15,7 +15,7 @@ using Npgsql;
 namespace BfaNet.Infrastructure.Services;
 
 public sealed class TransferService(
-    BankDbContext db, IRequestContext ctx, ISecretHasher hasher, CredentialAttempts attempts, IAuditWriter audit,
+    BankDbContext db, IRequestContext ctx, PinAuthorizer pins, IAuditWriter audit,
     LedgerPoster poster, IBlindIndex blind, IOptions<BankingOptions> bankOpts, TimeProvider clock) : ITransferService
 {
     private static readonly TimeSpan Wat = TimeSpan.FromHours(1); // Africa/Luanda, no DST
@@ -152,7 +152,7 @@ public sealed class TransferService(
             ?? throw AppException.NotFound("Transacção", feminine: true);
         var myIds = await mine.ToListAsync(ct);
         var entry = tx.Entries.First(e => myIds.Contains(e.AccountId));
-        return ToReceipt(tx, entry.BalanceAfter, entry.Direction);
+        return ReceiptMapper.From(tx, entry.BalanceAfter, entry.Direction);
     }
 
     // ---------- Core: idempotent, PIN-authorised, limit-checked, atomic ----------
@@ -164,7 +164,7 @@ public sealed class TransferService(
 
         if (await FindReplayAsync(customerId, key, requestHash, ct) is { } replay) return replay;
 
-        await VerifyPinAsync(customerId, m.Pin, m.AuditAction, ct);
+        await pins.VerifyAsync(customerId, m.Pin, m.AuditAction, ct);
 
         try
         {
@@ -190,7 +190,7 @@ public sealed class TransferService(
 
             await dbTx.CommitAsync(ct);
             await audit.RecordAsync(m.AuditAction, true, customerId, $"ref={tx.Reference} amount={m.Amount}");
-            return ToReceipt(tx, tx.Entries.First(e => e.Direction == LedgerDirection.Debit).BalanceAfter);
+            return ReceiptMapper.From(tx, tx.Entries.First(e => e.Direction == LedgerDirection.Debit).BalanceAfter);
         }
         catch (AppException ex)
         {
@@ -212,27 +212,7 @@ public sealed class TransferService(
         if (existing is null) return null;
         if (existing.RequestHash != requestHash)
             throw new AppException(ErrorCodes.IdempotencyMismatch, "Esta chave de idempotência já foi usada noutra operação.", 422);
-        return ToReceipt(existing, existing.Entries.First(e => e.Direction == LedgerDirection.Debit).BalanceAfter);
-    }
-
-    private async Task VerifyPinAsync(Guid customerId, string pin, string action, CancellationToken ct)
-    {
-        var now = clock.GetUtcNow();
-        var c = await db.Customers.AsNoTracking().Where(x => x.Id == customerId)
-            .Select(x => new { x.PinHash, x.PinLockoutEndsAt, x.Status }).FirstOrDefaultAsync(ct)
-            ?? throw new AppException(ErrorCodes.Unauthorized, "Sessão inválida.", 401);
-
-        if (c.Status != CustomerStatus.Active) throw new AppException(ErrorCodes.Forbidden, "Conta indisponível.", 403);
-        if (c.PinLockoutEndsAt > now)
-            throw new AppException(ErrorCodes.PinLocked, "PIN bloqueado temporariamente. Tente mais tarde.", 423);
-
-        if (!hasher.Verify(pin, c.PinHash))
-        {
-            await attempts.RegisterPinFailureAsync(customerId, ct);
-            await audit.RecordAsync(action, false, customerId, "bad-pin");
-            throw new AppException(ErrorCodes.InvalidPin, "PIN incorrecto.", 422);
-        }
-        await attempts.ResetPinAsync(customerId, ct);
+        return ReceiptMapper.From(existing, existing.Entries.First(e => e.Direction == LedgerDirection.Debit).BalanceAfter);
     }
 
     private async Task EnforceLimitsAsync(Guid customerId, decimal debitTotal, CancellationToken ct)
@@ -244,7 +224,7 @@ public sealed class TransferService(
         var dayStart = new DateTimeOffset(now.Date, Wat).ToUniversalTime();
         var spent = await db.Transactions.AsNoTracking()
             .Where(t => t.InitiatedBy == customerId && t.CreatedAt >= dayStart && t.Status == TransactionStatus.Completed
-                        && t.Kind != TransactionKind.Deposit) // only customer-initiated outflows count
+                        && t.Kind != TransactionKind.Deposit && t.Kind != TransactionKind.Loan) // only customer-initiated outflows count
             .Select(t => t.Amount + t.Fee).SumAsync(ct);
         if (spent + debitTotal > _bank.DailyLimit)
             throw new AppException(ErrorCodes.LimitExceeded, $"Excede o limite diário de {Kz(_bank.DailyLimit)}.", 422);
@@ -256,8 +236,4 @@ public sealed class TransferService(
     private static string Fingerprint(Move m) =>
         Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(
             $"{m.Kind}|{m.FromAccountId}|{m.Amount}|{m.CreditAccountId}|{m.CounterpartyIban}|{m.ExternalReference}|{m.Description}")));
-
-    private static TransactionReceipt ToReceipt(LedgerTransaction t, decimal balanceAfter, LedgerDirection direction = LedgerDirection.Debit) => new(
-        t.Id, t.Reference, t.Kind, t.Status, t.Amount, t.Fee, t.Currency, t.Description, t.CounterpartyName,
-        t.CounterpartyIban, balanceAfter, t.CreatedAt, direction, t.OriginatorName);
 }

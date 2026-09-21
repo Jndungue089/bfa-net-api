@@ -38,3 +38,24 @@ public sealed class BankingOptions
     public decimal InterbankFee { get; set; } = 150m;
     public bool OpenRegistration { get; set; } = true;
 }
+
+/// <summary>Financial assistant and microcredit policy. Everything here is evaluated on the server; clients only display it.</summary>
+public sealed class AssistantOptions
+{
+    public const string Section = "Assistant";
+
+    public int MinHistoryDays { get; set; } = 30;
+    public int MinIncomeMonths { get; set; } = 2;
+    public decimal MinMonthlyIncome { get; set; } = 30_000m;
+    public int MinHealthScore { get; set; } = 40;
+    /// <summary>Instalment may not exceed this share of average monthly income.</summary>
+    public decimal InstallmentToIncomeCap { get; set; } = 0.30m;
+    public decimal MaxOffer { get; set; } = 1_000_000m;
+    public decimal MinOffer { get; set; } = 20_000m;
+    public int[] Terms { get; set; } = [3, 6, 9, 12];
+    public decimal OriginationFeePercent { get; set; } = 1.0m;
+    /// <summary>Annual rate by health tier: ≥ 75, ≥ 60, otherwise.</summary>
+    public decimal RateTop { get; set; } = 18m;
+    public decimal RateMid { get; set; } = 24m;
+    public decimal RateBase { get; set; } = 30m;
+}

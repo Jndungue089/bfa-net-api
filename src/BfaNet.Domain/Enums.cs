@@ -10,7 +10,9 @@ public enum Currency { AOA, USD, EUR }
 
 public enum LedgerDirection { Debit, Credit }
 
-public enum TransactionKind { Transfer, ServicePayment, TopUp, StatePayment, Deposit, Fee }
+public enum TransactionKind { Transfer, ServicePayment, TopUp, StatePayment, Deposit, Fee, Loan, LoanRepayment }
+
+public enum LoanStatus { Active, Paid }
 
 public enum TransactionStatus { Completed, Failed, Reversed }
 

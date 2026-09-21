@@ -178,6 +178,7 @@ public sealed class StatementPdfService(BankDbContext db, IRequestContext ctx, T
     private static string KindLabel(TransactionKind k) => k switch
     {
         TransactionKind.Transfer => "Transferência", TransactionKind.ServicePayment => "Pagamento de serviços", TransactionKind.TopUp => "Carregamento / fornecedor",
-        TransactionKind.StatePayment => "Pagamento ao Estado", TransactionKind.Deposit => "Depósito", _ => "Comissão",
+        TransactionKind.StatePayment => "Pagamento ao Estado", TransactionKind.Deposit => "Depósito",
+        TransactionKind.Loan => "Microcrédito", TransactionKind.LoanRepayment => "Prestação de microcrédito", _ => "Comissão",
     };
 }

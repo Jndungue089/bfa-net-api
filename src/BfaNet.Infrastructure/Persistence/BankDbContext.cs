@@ -19,6 +19,8 @@ public sealed class BankDbContext(DbContextOptions<BankDbContext> options, IFiel
     public DbSet<ExchangeRate> ExchangeRates => Set<ExchangeRate>();
     public DbSet<CustomerAvatar> CustomerAvatars => Set<CustomerAvatar>();
     public DbSet<DeviceCredential> DeviceCredentials => Set<DeviceCredential>();
+    public DbSet<Loan> Loans => Set<Loan>();
+    public DbSet<LoanInstallment> LoanInstallments => Set<LoanInstallment>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder b)
     {
@@ -182,6 +184,31 @@ public sealed class BankDbContext(DbContextOptions<BankDbContext> options, IFiel
             e.HasIndex(x => x.TokenHash).IsUnique();
             e.HasIndex(x => x.CustomerId).HasFilter("revoked_at IS NULL");
             e.HasOne<Customer>().WithMany().HasForeignKey(x => x.CustomerId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        m.Entity<Loan>(e =>
+        {
+            e.ToTable("loans", t =>
+            {
+                t.HasCheckConstraint("ck_loans_principal_positive", "principal > 0");
+                t.HasCheckConstraint("ck_loans_installment_positive", "installment > 0");
+                t.HasCheckConstraint("ck_loans_total_covers_principal", "total_repayable >= principal");
+            });
+            e.HasKey(x => x.Id);
+            e.Property(x => x.AnnualRatePercent).HasPrecision(5, 2);
+            e.HasIndex(x => x.CustomerId);
+            // Database-level guarantee: at most ONE active microcredit per customer, whatever races the application code.
+            e.HasIndex(x => x.CustomerId).IsUnique().HasFilter("status = 'Active'").HasDatabaseName("ux_loans_one_active_per_customer");
+            e.HasOne<Customer>().WithMany().HasForeignKey(x => x.CustomerId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<Account>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
+            e.HasMany(x => x.Installments).WithOne().HasForeignKey(x => x.LoanId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        m.Entity<LoanInstallment>(e =>
+        {
+            e.ToTable("loan_installments", t => t.HasCheckConstraint("ck_loan_installments_amount_positive", "amount > 0"));
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.LoanId, x.Number }).IsUnique();
         });
 
         m.Entity<ExchangeRate>(e =>

@@ -100,6 +100,16 @@ public interface ICardService
     Task<CardDto> UpdateAsync(Guid id, UpdateCardRequest request, CancellationToken ct);
 }
 
+public interface IAssistantService
+{
+    Task<AssistantInsights> InsightsAsync(CancellationToken ct);
+    Task<CreditOfferDto> CreditOfferAsync(CancellationToken ct);
+    Task<CreditSimulationDto> SimulateAsync(decimal amount, int months, CancellationToken ct);
+    Task<LoanDto> AcceptCreditAsync(Guid idempotencyKey, AcceptCreditRequest request, CancellationToken ct);
+    Task<IReadOnlyList<LoanDto>> LoansAsync(CancellationToken ct);
+    Task<TransactionReceipt> RepayAsync(Guid idempotencyKey, Guid loanId, RepayLoanRequest request, CancellationToken ct);
+}
+
 public interface IPublicInfoService
 {
     Task<IReadOnlyList<ExchangeRateDto>> ExchangeRatesAsync(CancellationToken ct);

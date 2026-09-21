@@ -15,6 +15,7 @@ public static class DependencyInjection
     {
         s.AddOptions<SecurityOptions>().Bind(cfg.GetSection(SecurityOptions.Section));
         s.AddOptions<BankingOptions>().Bind(cfg.GetSection(BankingOptions.Section));
+        s.AddOptions<AssistantOptions>().Bind(cfg.GetSection(AssistantOptions.Section));
 
         s.AddSingleton(TimeProvider.System);
         s.AddSingleton<IFieldEncryptor, AesGcmFieldEncryptor>();
@@ -30,6 +31,7 @@ public static class DependencyInjection
         s.AddScoped(sp => sp.GetRequiredService<IDbContextFactory<BankDbContext>>().CreateDbContext());
 
         s.AddScoped<CredentialAttempts>();
+        s.AddScoped<PinAuthorizer>();
         s.AddScoped<LedgerPoster>();
         s.AddScoped<IAuditWriter, AuditWriter>();
         s.AddScoped<IAuthService, AuthService>();
@@ -38,6 +40,7 @@ public static class DependencyInjection
         s.AddScoped<IBeneficiaryService, BeneficiaryService>();
         s.AddScoped<ICardService, CardService>();
         s.AddScoped<IPublicInfoService, PublicInfoService>();
+        s.AddScoped<IAssistantService, AssistantService>();
         s.AddScoped<IAvatarService, AvatarService>();
         s.AddScoped<IReceiptPdfService, ReceiptPdfService>();
         s.AddScoped<IStatementPdfService, StatementPdfService>();

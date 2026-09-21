@@ -21,7 +21,8 @@ public sealed class LedgerPoster(BankDbContext db, TimeProvider clock)
 
     public sealed record NewTransaction(
         Guid InitiatedBy, Guid IdempotencyKey, string RequestHash, TransactionKind Kind, decimal Amount, decimal Fee,
-        string? Description, string? OriginatorName, string? CounterpartyName, string? CounterpartyIban, string? ExternalReference);
+        string? Description, string? OriginatorName, string? CounterpartyName, string? CounterpartyIban, string? ExternalReference,
+        DateTimeOffset? CreatedAt = null);
 
     public async Task<LedgerTransaction> PostAsync(NewTransaction spec, LedgerPosting posting, CancellationToken ct)
     {
@@ -36,7 +37,7 @@ public sealed class LedgerPoster(BankDbContext db, TimeProvider clock)
         if (accounts.Values.Any(a => a.Currency != currency))
             throw new AppException(ErrorCodes.Validation, "Operações entre moedas diferentes não são suportadas.", 422);
 
-        var now = clock.GetUtcNow();
+        var now = spec.CreatedAt ?? clock.GetUtcNow(); // backdating is only used by the demo seed and tests
         var tx = new LedgerTransaction
         {
             Reference = NewReference(now), InitiatedBy = spec.InitiatedBy, IdempotencyKey = spec.IdempotencyKey,
